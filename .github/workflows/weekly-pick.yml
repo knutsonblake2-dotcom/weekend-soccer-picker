@@ -1,0 +1,34 @@
+name: Weekly game pick
+
+on:
+  # Sunday 6pm Pacific = Monday 01:00 UTC during Pacific Daylight Time
+  # (spring-fall). During Pacific Standard Time (winter) this runs at
+  # 5pm Pacific instead - a 1 hour drift twice a year that isn't worth
+  # the added complexity to correct for. See README for details.
+  schedule:
+    - cron: "0 1 * * 1"
+  # Lets you trigger a run manually from the Actions tab, e.g. to test.
+  workflow_dispatch: {}
+
+jobs:
+  send-pick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run weekly pick
+        env:
+          FOOTBALL_DATA_API_KEY: ${{ secrets.FOOTBALL_DATA_API_KEY }}
+          GMAIL_ADDRESS: ${{ secrets.GMAIL_ADDRESS }}
+          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+        run: python -m src.main

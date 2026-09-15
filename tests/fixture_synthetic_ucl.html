@@ -1,0 +1,47 @@
+<!--
+  Synthetic fixture for testing purposes only - a hand-built row following
+  the exact tag structure confirmed against the live site's real Premier
+  League / Peacock rows (see fixture_2026-09-19.html), but for a Champions
+  League match on Paramount+, since no such match happened to be scheduled
+  in the several weeks around when this scraper was written (Sept 2026 -
+  the Champions League was between matchdays). This validates that the
+  cid=50 + "Paramount+" broadcaster filter works, without depending on a
+  live match existing at test time.
+
+  Also includes one Premier League row with NO Peacock in its channel
+  list, to confirm non-Peacock PL games are correctly excluded.
+-->
+<table class="schedules blueborder"><tbody>
+<tr id="9000001" class="matchrow" data-timer="" data-t1="1" data-t2="2" data-ko="2026-10-13 19:00:00" data-cid="50" data-has-tv="1">
+  <td class="timecol">
+    <div class="meta">
+      <span class="livecell live" title="Live Broadcast"></span>
+      <span class="timecell"><span id="ko9000001" class="ts" dv="1760385600000" df="h:MMtt">3:00pm</span></span>
+    </div>
+  </td>
+  <td valign="top" id="match" class="matchcol">
+    <div class="match-ch-flex"><div class="match-name-col">
+      <a href="/match/real-madrid-vs-juventus/synthetic1#9000001" title="Real Madrid vs Juventus" id="g9000001">Real Madrid vs Juventus</a>
+    </div>
+    <div id="channels" class="channels-col"><div class="mchannels disable-link">
+      <a href="/channels/paramountplus/" title="Paramount+ (live stream available)" class="homech flag ministream">Paramount+</a>, <a href="/channels/cbs-sports-network/" title="CBS Sports Network" class="homech">CBS Sports Network</a>
+    </div></div></div>
+  </td>
+</tr>
+<tr id="9000002" class="matchrow" data-timer="" data-t1="3" data-t2="4" data-ko="2026-10-14 19:00:00" data-cid="6" data-has-tv="1">
+  <td class="timecol">
+    <div class="meta">
+      <span class="livecell live" title="Live Broadcast"></span>
+      <span class="timecell"><span id="ko9000002" class="ts" dv="1760472000000" df="h:MMtt">3:00pm</span></span>
+    </div>
+  </td>
+  <td valign="top" id="match" class="matchcol">
+    <div class="match-ch-flex"><div class="match-name-col">
+      <a href="/match/chelsea-vs-fulham/synthetic2#9000002" title="Chelsea vs Fulham" id="g9000002">Chelsea vs Fulham</a>
+    </div>
+    <div id="channels" class="channels-col"><div class="mchannels disable-link">
+      <a href="/channels/nbc/" title="NBC" class="homech">NBC</a>, <a href="/channels/fubo-tv/" title="fuboTV (live stream available)" class="homech flag ministream">fuboTV</a>
+    </div></div></div>
+  </td>
+</tr>
+</tbody></table>

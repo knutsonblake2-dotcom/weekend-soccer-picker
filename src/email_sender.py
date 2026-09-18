@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import smtplib
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
 from . import config
@@ -21,7 +22,12 @@ def send_email(subject: str, body_text: str, body_html: str | None = None) -> bo
         return False
 
     if body_html:
-        msg = MIMEText(body_html, "html")
+        # multipart/alternative: mail clients that render HTML show the
+        # nicer version; anything that can't (or is set to prefer plain
+        # text) falls back to body_text. Gmail always shows the HTML part.
+        msg = MIMEMultipart("alternative")
+        msg.attach(MIMEText(body_text, "plain"))
+        msg.attach(MIMEText(body_html, "html"))
     else:
         msg = MIMEText(body_text, "plain")
     msg["Subject"] = subject

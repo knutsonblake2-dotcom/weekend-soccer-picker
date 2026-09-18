@@ -1,17 +1,24 @@
 # Weekend Soccer Picker
 
-Every Sunday evening, this repo emails four picks:
+Every Sunday evening, this repo emails a **top pick and a secondary
+"also good" option** for each of four categories:
 
-1. The best upcoming Champions League game on Paramount+ this week.
-2. The best upcoming Premier League game on Peacock this week.
-3. The best Champions League game to go back and watch as a replay from
+1. Best upcoming Champions League game on Paramount+ this week.
+2. Best upcoming Premier League game on Peacock this week.
+3. Best Champions League game to go back and watch as a replay from
    last week.
-4. The best Premier League game to go back and watch as a replay from
+4. Best Premier League game to go back and watch as a replay from
    last week.
+
+That's up to eight picks on a normal week - fewer whenever a category
+doesn't have a real second candidate (e.g. only one game airs, or a
+competition is between matchdays).
 
 It also lists every other Paramount+ Champions League / Peacock Premier
-League game coming up, for context. It runs for free on GitHub Actions -
-no server to maintain.
+League game coming up, for context. The email arrives as a nicely
+formatted HTML message (with a plain-text fallback for mail clients
+that want it). It runs for free on GitHub Actions - no server to
+maintain.
 
 ## How it decides the "best" game
 
@@ -33,18 +40,26 @@ starts), that game is listed but left unranked rather than guessed at.
 result is more informative than a table position: when an
 `ANTHROPIC_API_KEY` secret is set (see setup below), Claude looks at
 last week's finished games - final score, half-time score, and table
-position of both teams - and picks whichever one sounds like it was the
-most exciting to watch (comeback, late drama, upset, goal-fest).
-Without that key, it falls back to a simpler formula: total goals, how
-much the score swung after half-time, and how big an upset it was
-against the table. Either way, the email itself just names the matchup -
-no spoilers on the score.
+position of both teams - and ranks the top two most exciting ones to
+rewatch (comeback, late drama, upset, goal-fest). Without that key, it
+falls back to a simpler formula: total goals, how much the score swung
+after half-time, and how big an upset it was against the table. Either
+way, the email itself just names the matchups - no spoilers on the
+score.
 
 Replay picks are drawn from *all* finished Champions League / Premier
 League games in the last week, on the assumption that Paramount+
 carries every Champions League match and Peacock carries every Premier
 League match in the US (true as of when this was built - see "If the
 scraper breaks" below if that assumption ever stops holding).
+
+**Cost control:** the Claude API call for replay picks is genuinely
+optional and skipped automatically whenever there's nothing worth
+ranking - no finished games in the lookback window (e.g. during a
+Champions League break between matchdays), no results data to score
+them with, or just a single candidate game. It's only called when
+there are at least two real games to choose between, so a quiet week
+costs nothing.
 
 ## One-time setup
 

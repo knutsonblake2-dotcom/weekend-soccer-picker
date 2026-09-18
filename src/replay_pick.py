@@ -1,5 +1,6 @@
-"""Picks the best "replay" (most worth rewatching) Champions League and
-Premier League game from the past week.
+"""Picks the best "replay" games (top pick + a runner-up) - the ones most
+worth rewatching - from the past week, for both Champions League and
+Premier League.
 
 Unlike the forward-looking picks in pick_best_game.py (which only have
 table position to go on), a finished game has an actual result - so this
@@ -8,6 +9,12 @@ upsets against the table. When an Anthropic API key is configured, an LLM
 does that judgment call directly (it's the kind of narrative reasoning a
 fixed formula does badly); otherwise it falls back to a simple stats-only
 heuristic so the tool still works without that key.
+
+Cost-consciousness: the LLM is only ever called when there are at least
+two real candidates to choose between - see the early-outs in
+get_best_replays() below. A quiet week (e.g. an international break, or a
+gap between Champions League matchdays) costs nothing, not even a
+skipped-but-billed call.
 """
 from __future__ import annotations
 
@@ -30,7 +37,7 @@ logger = logging.getLogger(__name__)
 @dataclass
 class ReplayPick:
     match: Match
-    picked_by: str  # "llm" or "heuristic", for logging only
+    picked_by: str  # "llm", "heuristic", or "only-option" - for logging only
 
 
 def _split_teams(teams: str) -> tuple[str, str]:
@@ -94,16 +101,16 @@ def _heuristic_score(
     return total_goals * 1.0 + swing * 1.5 + upset
 
 
-def _heuristic_pick(candidates: List[dict]) -> Optional[int]:
-    if not candidates:
-        return None
-    best_idx = max(range(len(candidates)), key=lambda i: candidates[i]["_score"])
-    return best_idx
+def _heuristic_pick(candidates: List[dict], n: int) -> List[int]:
+    order = sorted(range(len(candidates)), key=lambda i: -candidates[i]["_score"])
+    return order[:n]
 
 
-def _llm_pick(candidates: List[dict], competition_label: str) -> Optional[int]:
-    if not config.ANTHROPIC_API_KEY or not candidates:
-        return None
+def _llm_pick(candidates: List[dict], competition_label: str, n: int) -> Optional[List[int]]:
+    """Asks Claude to rank the top `n` candidates, best first. Returns None
+    (never a partial/best-effort list) on any failure, so the caller falls
+    back to the heuristic rather than trusting a malformed response.
+    """
     try:
         import anthropic
     except ImportError:
@@ -125,11 +132,12 @@ def _llm_pick(candidates: List[dict], competition_label: str) -> Optional[int]:
 
     prompt = (
         f"Here are last week's finished {competition_label} matches, as JSON. "
-        "Pick the SINGLE most exciting one to recommend as a replay - weigh "
-        "comebacks and late drama (compare halftime_score to the final "
-        "score in matchup), total goals, upsets against the table "
-        "positions, and rivalry/stakes implied by those positions. "
-        'Respond with ONLY compact JSON of the form {"pick_index": <int>} '
+        f"Rank the top {n} most exciting ones to recommend as replays, best "
+        "first - weigh comebacks and late drama (compare halftime_score to "
+        "the final score in matchup), total goals, upsets against the "
+        "table positions, and rivalry/stakes implied by those positions. "
+        'Respond with ONLY compact JSON of the form {"pick_indices": '
+        f'[<int>, ...]}} listing up to {n} distinct indices, best first, '
         "and nothing else - no explanation, no markdown.\n\n"
         f"{json.dumps(listing)}"
     )
@@ -138,7 +146,7 @@ def _llm_pick(candidates: List[dict], competition_label: str) -> Optional[int]:
         client = anthropic.Anthropic(api_key=config.ANTHROPIC_API_KEY)
         resp = client.messages.create(
             model=config.ANTHROPIC_MODEL,
-            max_tokens=100,
+            max_tokens=150,
             messages=[{"role": "user", "content": prompt}],
         )
         text = "".join(getattr(block, "text", "") for block in resp.content)
@@ -147,23 +155,42 @@ def _llm_pick(candidates: List[dict], competition_label: str) -> Optional[int]:
             logger.warning("LLM replay pick returned no JSON: %r", text)
             return None
         data = json.loads(match.group(0))
-        idx = data.get("pick_index")
-        if isinstance(idx, int) and 0 <= idx < len(candidates):
-            return idx
-        logger.warning("LLM replay pick returned out-of-range index: %r", idx)
+        idx_list = data.get("pick_indices")
+        if not isinstance(idx_list, list):
+            logger.warning("LLM replay pick missing pick_indices: %r", data)
+            return None
+        seen = set()
+        clean: List[int] = []
+        for idx in idx_list:
+            if isinstance(idx, int) and 0 <= idx < len(candidates) and idx not in seen:
+                seen.add(idx)
+                clean.append(idx)
+        if not clean:
+            logger.warning("LLM replay pick had no valid indices: %r", idx_list)
+            return None
+        return clean[:n]
     except Exception as exc:  # the anthropic client can raise several error types
         logger.warning("LLM replay pick failed, falling back to heuristic: %s", exc)
-    return None
+        return None
 
 
-def get_best_replay(competition: str) -> Optional[ReplayPick]:
-    """Returns the best replay pick for `competition`, or None if there's
-    nothing to recommend (no finished games in the lookback window, or no
-    result data to score them with).
+def get_best_replays(competition: str, n: int = 2) -> List[ReplayPick]:
+    """Returns up to `n` replay picks for `competition`, best first. Empty
+    list if there's nothing to recommend (no finished games in the
+    lookback window, or no result data to score them with) - see the
+    module docstring for why that case never touches the LLM.
     """
+    label = COMPETITION_LABELS[competition]
+
     finished = [m for m in get_recent_matches(competition) if m.finished]
     if not finished:
-        return None
+        logger.info(
+            "No finished %s games in the last %d days - nothing to rank, "
+            "skipping the replay pick entirely (no LLM call, no cost).",
+            label,
+            config.LOOKBACK_DAYS,
+        )
+        return []
 
     result_lookup = _build_result_lookup(standings_mod.get_recent_results(competition))
 
@@ -202,15 +229,25 @@ def get_best_replay(competition: str) -> Optional[ReplayPick]:
         candidate_matches.append(m)
 
     if not candidates:
-        return None
+        logger.info(
+            "No %s results matched to a scoreable game - skipping the replay "
+            "pick (no LLM call, no cost).",
+            label,
+        )
+        return []
 
-    label = COMPETITION_LABELS[competition]
-    idx = _llm_pick(candidates, label)
-    picked_by = "llm"
-    if idx is None:
-        idx = _heuristic_pick(candidates)
-        picked_by = "heuristic"
-    if idx is None:
-        return None
+    if len(candidates) == 1:
+        # Nothing to actually rank - don't spend a call finding out there's
+        # only one answer.
+        return [ReplayPick(match=candidate_matches[0], picked_by="only-option")]
 
-    return ReplayPick(match=candidate_matches[idx], picked_by=picked_by)
+    idx_list = None
+    picked_by = "heuristic"
+    if config.ANTHROPIC_API_KEY:
+        idx_list = _llm_pick(candidates, label, n)
+        if idx_list is not None:
+            picked_by = "llm"
+    if idx_list is None:
+        idx_list = _heuristic_pick(candidates, n)
+
+    return [ReplayPick(match=candidate_matches[i], picked_by=picked_by) for i in idx_list]

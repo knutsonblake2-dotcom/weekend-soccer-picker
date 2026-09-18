@@ -31,6 +31,16 @@ GMAIL_ADDRESS = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_APP_PASSWORD = os.environ.get("GMAIL_APP_PASSWORD", "")
 EMAIL_TO = os.environ.get("EMAIL_TO") or GMAIL_ADDRESS
 LOOKAHEAD_DAYS = int(os.environ.get("LOOKAHEAD_DAYS", "7"))
+LOOKBACK_DAYS = int(os.environ.get("LOOKBACK_DAYS", "7"))
+
+# Used to pick the best "replay" game from last week (see src/replay_pick.py).
+# Optional: if unset, replay picks fall back to a simple stats-only heuristic.
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+# A small/fast, cheap model is plenty for "pick the most exciting match from
+# this short list." Override via secret if this ID is ever retired -
+# check https://platform.claude.com/docs/en/about-claude/models/overview
+# for the current fast-model ID.
+ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
 # Competition IDs used by livesoccertv.com (verified by inspecting the live
 # site in September 2026 - see README "If the scraper breaks" section if

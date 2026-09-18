@@ -67,7 +67,26 @@ def test_synthetic_champions_league_fixture():
     print("test_synthetic_champions_league_fixture: OK")
 
 
+def test_finished_matches_score_extraction_and_ft_filter():
+    rows = _rows_from_fixture("fixture_finished_matches.html")
+    ucl_rows = [r for r in rows if r.get("data-cid") == "50"]
+    assert len(ucl_rows) == 3  # includes the postponed row
+
+    ft_rows = [r for r in ucl_rows if r.get("data-timer") == "FT"]
+    assert len(ft_rows) == 2, "the postponed row must not count as FT"
+
+    scores = {s._extract_teams(r): s._extract_score(r) for r in ft_rows}
+    assert scores["Barcelona vs Feyenoord"] == "5 - 1"
+    assert scores["PSG vs Slovan Bratislava"] == "6 - 1"
+
+    postponed = [r for r in ucl_rows if r.get("data-timer") == "Postp."][0]
+    assert s._extract_score(postponed) is None
+
+    print("test_finished_matches_score_extraction_and_ft_filter: OK")
+
+
 if __name__ == "__main__":
     test_real_premier_league_fixture()
     test_synthetic_champions_league_fixture()
+    test_finished_matches_score_extraction_and_ft_filter()
     print("All tests passed.")

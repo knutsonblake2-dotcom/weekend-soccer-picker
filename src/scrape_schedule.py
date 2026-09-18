@@ -13,8 +13,16 @@ How this works (reverse-engineered from the live site in Sept 2026):
   match, and a <span dv="..."> holding the exact kickoff time as a
   millisecond Unix timestamp (unambiguous, no timezone guessing needed).
 - Finished matches collapse their channel list to a single "Available
-  on-demand" link, which is fine for us since we only care about
-  upcoming games.
+  on-demand" link instead of naming the broadcaster. That's fine for
+  upcoming games (we only care about the broadcaster there), but it means
+  we CANNOT verify from this page alone that a finished game specifically
+  aired on Paramount+/Peacock. For past games, this module instead relies
+  on the fact that Paramount+ holds all US Champions League streaming
+  rights and Peacock carries all Premier League matches - i.e. every
+  finished match in these two competitions counts as "on that service."
+  If that ever stops being true (a rights deal changes), the "replay"
+  picks in src/replay_pick.py would need a broadcaster check re-added
+  here, similar to _row_has_broadcaster() below.
 
 If livesoccertv.com changes its markup, this is the file that will need
 updating - see the README's "If the scraper breaks" section.
@@ -24,7 +32,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
-from typing import List
+from typing import List, Optional
 
 import requests
 from bs4 import BeautifulSoup
@@ -42,6 +50,8 @@ class Match:
     teams: str  # e.g. "Arsenal vs Manchester City"
     kickoff_utc: datetime
     match_url: str
+    score: Optional[str] = None  # e.g. "5 - 1", only set for finished matches
+    finished: bool = False
 
     def kickoff_local_str(self, tz) -> str:
         return self.kickoff_utc.astimezone(tz).strftime("%a %b %-d, %-I:%M %p %Z")
@@ -101,6 +111,17 @@ def _extract_teams(row) -> str | None:
     return (link.get("title") or link.get_text()).strip()
 
 
+def _extract_score(row) -> Optional[str]:
+    link = row.select_one("#match a") or row.select_one("td.matchcol a")
+    if not link:
+        return None
+    score_el = link.find("score")
+    if not score_el:
+        return None
+    text = score_el.get_text(strip=True)
+    return text or None
+
+
 def _extract_match_url(row) -> str:
     link = row.select_one("#match a") or row.select_one("td.matchcol a")
     href = link.get("href") if link else None
@@ -153,6 +174,58 @@ def get_upcoming_matches(
 
     # De-duplicate (a match can appear on two adjacent date pages if kickoff
     # is right at a day boundary in some timezone interpretation).
+    seen = set()
+    unique_matches = []
+    for m in matches:
+        key = (m.teams, m.kickoff_utc)
+        if key not in seen:
+            seen.add(key)
+            unique_matches.append(m)
+
+    unique_matches.sort(key=lambda m: m.kickoff_utc)
+    return unique_matches
+
+
+def get_recent_matches(
+    competition: str, lookback_days: int | None = None
+) -> List[Match]:
+    """Returns finished matches for `competition` from the last
+    `lookback_days` days (see the module docstring for why there's no
+    broadcaster check here, unlike get_upcoming_matches).
+    """
+    lookback_days = lookback_days or config.LOOKBACK_DAYS
+    competition_id = config.LIVESOCCERTV_COMPETITION_IDS[competition]
+
+    today = datetime.now(timezone.utc).date()
+    matches: List[Match] = []
+
+    for offset in range(1, lookback_days + 1):
+        day = today - timedelta(days=offset)
+        html = _fetch_html(day)
+        if not html:
+            continue
+        soup = BeautifulSoup(html, "html.parser")
+        rows = soup.select(f'tr.matchrow[data-cid="{competition_id}"]')
+        for row in rows:
+            if row.get("data-timer") != "FT":
+                continue  # skip postponed/cancelled/still-scheduled rows
+            teams = _extract_teams(row)
+            if not teams:
+                continue
+            kickoff = _parse_kickoff(row) or datetime.combine(
+                day, datetime.min.time(), tzinfo=timezone.utc
+            )
+            matches.append(
+                Match(
+                    competition=competition,
+                    teams=teams,
+                    kickoff_utc=kickoff,
+                    match_url=_extract_match_url(row),
+                    score=_extract_score(row),
+                    finished=True,
+                )
+            )
+
     seen = set()
     unique_matches = []
     for m in matches:

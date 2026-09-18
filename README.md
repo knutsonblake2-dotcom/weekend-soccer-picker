@@ -1,17 +1,22 @@
 # Weekend Soccer Picker
 
-Every Sunday evening, this repo checks which Champions League games are
-airing on Paramount+ and which Premier League games are airing on
-Peacock in the coming week, scores them by how good a watch they're
-likely to be (using current league standings), and emails you the pick
-plus the full list of games.
+Every Sunday evening, this repo emails four picks:
 
-It runs for free on GitHub Actions - no server to maintain.
+1. The best upcoming Champions League game on Paramount+ this week.
+2. The best upcoming Premier League game on Peacock this week.
+3. The best Champions League game to go back and watch as a replay from
+   last week.
+4. The best Premier League game to go back and watch as a replay from
+   last week.
+
+It also lists every other Paramount+ Champions League / Peacock Premier
+League game coming up, for context. It runs for free on GitHub Actions -
+no server to maintain.
 
 ## How it decides the "best" game
 
-For each candidate game, it looks up both teams' position in the current
-table and scores the match on two things:
+**Upcoming games** are scored using current league standings, on two
+things:
 
 1. **Quality** - how high both teams are in the table.
 2. **Closeness** - how near each other in the table they are (a game
@@ -24,10 +29,28 @@ gospel. If standings for a team aren't available yet (e.g. very early in
 a season, or during the days before the Champions League league phase
 starts), that game is listed but left unranked rather than guessed at.
 
+**Replay picks** (last week's games) work differently, since an actual
+result is more informative than a table position: when an
+`ANTHROPIC_API_KEY` secret is set (see setup below), Claude looks at
+last week's finished games - final score, half-time score, and table
+position of both teams - and picks whichever one sounds like it was the
+most exciting to watch (comeback, late drama, upset, goal-fest).
+Without that key, it falls back to a simpler formula: total goals, how
+much the score swung after half-time, and how big an upset it was
+against the table. Either way, the email itself just names the matchup -
+no spoilers on the score.
+
+Replay picks are drawn from *all* finished Champions League / Premier
+League games in the last week, on the assumption that Paramount+
+carries every Champions League match and Peacock carries every Premier
+League match in the US (true as of when this was built - see "If the
+scraper breaks" below if that assumption ever stops holding).
+
 ## One-time setup
 
-You'll need three things: a free API key for standings data, a Gmail
-app password for sending mail, and to add both as secrets on this repo.
+You'll need a few things: a free API key for standings data, a Gmail
+app password for sending mail, optionally an Anthropic API key for
+smarter replay picks, and to add them all as secrets on this repo.
 
 ### 1. Get a football-data.org API key (free)
 
@@ -52,7 +75,18 @@ security). Instead:
 The email will be sent from (and by default, to) this same Gmail
 address.
 
-### 3. Add repo secrets
+### 3. Get an Anthropic API key (optional, for smarter replay picks)
+
+1. Go to <https://console.anthropic.com> and sign up.
+2. Create an API key under **API Keys**.
+3. Note that unlike the other two services, this one isn't free - a
+   once-a-week call to a small/cheap model costs a fraction of a cent,
+   but it does need billing set up on the Anthropic Console.
+
+If you skip this, the two replay picks still work, just using the
+simpler stats-only formula instead of Claude's judgment.
+
+### 4. Add repo secrets
 
 In this repo on GitHub: **Settings -> Secrets and variables -> Actions ->
 New repository secret**. Add:
@@ -62,9 +96,10 @@ New repository secret**. Add:
 | `FOOTBALL_DATA_API_KEY` | the token from step 1 |
 | `GMAIL_ADDRESS` | your Gmail address |
 | `GMAIL_APP_PASSWORD` | the 16-character app password from step 2 |
+| `ANTHROPIC_API_KEY` | *(optional)* the key from step 3, for smarter replay picks |
 | `EMAIL_TO` | *(optional)* where to send the email, if different from `GMAIL_ADDRESS` |
 
-### 4. Make sure Actions are enabled
+### 5. Make sure Actions are enabled
 
 New repos usually have Actions on by default. If not: **Settings ->
 Actions -> General -> Allow all actions**.
@@ -103,8 +138,9 @@ PDT (spring-fall) and PST (winter). If you want the exact hour year
 round, just update the cron line twice a year (or open an issue with
 yourself as a reminder).
 
-You can also change how many days ahead it looks by setting a
-`LOOKAHEAD_DAYS` secret (default 7).
+You can also change how many days ahead it looks for upcoming games with
+a `LOOKAHEAD_DAYS` secret, or how many days back it looks for replay
+picks with `LOOKBACK_DAYS` (both default to 7).
 
 ## If the scraper breaks
 
@@ -122,16 +158,24 @@ updating. In particular:
   timestamp. If GitHub Actions runs start failing, check the Action's
   logs first - `src/scrape_schedule.py` logs a warning for every page it
   can't fetch or parse.
+- Replay picks (last week's games) don't check the broadcaster at all -
+  finished-match rows on livesoccertv.com collapse their channel list to
+  a generic "Available on-demand" link, so instead the code assumes
+  every Champions League game is on Paramount+ and every Premier League
+  game is on Peacock (true in the US as of when this was built). If a
+  rights deal ever changes that, `src/replay_pick.py` would need a real
+  broadcaster check re-added.
 
 ## Project layout
 
 ```
 src/
   config.py          - environment variables and constants
-  scrape_schedule.py - finds upcoming games on Paramount+ / Peacock
-  standings.py        - fetches league tables from football-data.org
-  team_aliases.py     - matches team names between the two data sources
-  pick_best_game.py   - scores games and writes the explanation blurbs
+  scrape_schedule.py - finds upcoming/recent games on Paramount+ / Peacock
+  standings.py        - fetches league tables + recent results from football-data.org
+  team_aliases.py     - matches team names between data sources
+  pick_best_game.py   - scores upcoming games and writes explanation blurbs
+  replay_pick.py       - picks the best game to rewatch from last week
   email_sender.py     - sends the email via Gmail SMTP
   main.py             - ties it all together
 .github/workflows/weekly-pick.yml - the schedule

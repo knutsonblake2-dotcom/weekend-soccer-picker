@@ -11,6 +11,7 @@ from zoneinfo import ZoneInfo
 from . import config
 from .email_sender import send_email
 from .pick_best_game import COMPETITION_LABELS, ScoredMatch, score_matches
+from .replay_pick import ReplayPick, get_best_replay
 from .scrape_schedule import get_upcoming_matches
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -29,21 +30,44 @@ def _format_match_line(sm: ScoredMatch) -> str:
     return line
 
 
-def build_email_body(scored: list[ScoredMatch]) -> tuple[str, str]:
+def _format_replay_line(label: str, pick: ReplayPick | None) -> str:
+    if not pick:
+        return f"{label}: (no standout game found in the last {config.LOOKBACK_DAYS} days)"
+    line = f"{label}: {pick.match.teams}"
+    if pick.match.match_url:
+        line += f"\n  {pick.match.match_url}"
+    return line
+
+
+def build_email_body(
+    scored: list[ScoredMatch],
+    cl_replay: ReplayPick | None = None,
+    pl_replay: ReplayPick | None = None,
+) -> tuple[str, str]:
     """Returns (subject, plain_text_body)."""
     ranked = [sm for sm in scored if sm.score is not None]
     unranked = [sm for sm in scored if sm.score is None]
 
+    replay_lines = [
+        "LAST WEEK'S BEST REPLAY",
+        "=" * 40,
+        _format_replay_line("Champions League (Paramount+)", cl_replay),
+        _format_replay_line("Premier League (Peacock)", pl_replay),
+        "",
+    ]
+
     if not scored:
         subject = "This week: no Champions League or Premier League games on Paramount+/Peacock"
-        body = (
+        body_lines = [
             "No upcoming Champions League games on Paramount+ or Premier League "
             "games on Peacock were found in the next "
-            f"{config.LOOKAHEAD_DAYS} days.\n\n"
+            f"{config.LOOKAHEAD_DAYS} days.",
+            "",
             "(This can happen during international breaks or between "
-            "Champions League matchdays - nothing's broken.)"
-        )
-        return subject, body
+            "Champions League matchdays - nothing's broken.)",
+            "",
+        ] + replay_lines
+        return subject, "\n".join(body_lines)
 
     lines = []
 
@@ -62,6 +86,8 @@ def build_email_body(scored: list[ScoredMatch]) -> tuple[str, str]:
         lines.append("")
     else:
         subject = "This week's Champions League & Premier League games (unranked - standings unavailable)"
+
+    lines.extend(replay_lines)
 
     lines.append("ALL CHAMPIONS LEAGUE GAMES ON PARAMOUNT+")
     lines.append("=" * 40)
@@ -104,7 +130,12 @@ def main() -> None:
     all_matches = cl_matches + pl_matches
     scored = score_matches(all_matches)
 
-    subject, body = build_email_body(scored)
+    logger.info("Picking last week's best Champions League replay...")
+    cl_replay = get_best_replay("champions_league")
+    logger.info("Picking last week's best Premier League replay...")
+    pl_replay = get_best_replay("premier_league")
+
+    subject, body = build_email_body(scored, cl_replay, pl_replay)
     logger.info("Subject: %s", subject)
     print(body)
 

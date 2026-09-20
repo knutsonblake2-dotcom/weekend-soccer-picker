@@ -47,25 +47,6 @@ def send_email(subject: str, body_text: str, body_html: str | None = None) -> bo
     msg["From"] = config.GMAIL_ADDRESS
     msg["To"] = ", ".join(recipients)
 
-    # --- TEMPORARY diagnostic (safe: never logs the actual address or
-    # password values, only harmless metadata) to figure out why Gmail
-    # keeps rejecting credentials that test fine outside GitHub Actions.
-    # Remove this block once the real cause is found.
-    addr = config.GMAIL_ADDRESS
-    pw = config.GMAIL_APP_PASSWORD
-    logger.info(
-        "DIAGNOSTIC - address: len=%d, has_at=%s, has_leading/trailing_space=%s "
-        "| app password: len=%d, len_after_strip=%d, has_whitespace=%s, "
-        "all_alnum_after_removing_spaces=%s",
-        len(addr),
-        "@" in addr,
-        addr != addr.strip(),
-        len(pw),
-        len(pw.strip()),
-        any(c.isspace() for c in pw.strip()),
-        pw.replace(" ", "").isalnum(),
-    )
-
     try:
         with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
             server.login(config.GMAIL_ADDRESS, config.GMAIL_APP_PASSWORD)

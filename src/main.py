@@ -1,12 +1,18 @@
-"""Entry point: scrape this week's Champions League (Paramount+) and
-Premier League (Peacock) games, score them, and email Blake the picks.
+"""Entry point: scrape this week's games in every tracked competition
+(see config.COMPETITIONS), score them, and email Blake the picks.
 
-Every category - Champions League upcoming, Premier League upcoming,
-Champions League replay, Premier League replay - gets a top pick and,
-when there's a genuine second candidate, a secondary "also good" option
-too. That's up to eight picks on a normal week, fewer whenever a
-competition is between matchdays (see replay_pick.py's module docstring
-for why a quiet week never costs an LLM call).
+Every competition - currently Champions League (Paramount+), Premier
+League (Peacock), Serie A (Paramount+), and Bundesliga (Fandango) - gets
+a top pick and, when there's a genuine second candidate, a secondary
+"also good" option, for both upcoming games AND last week's best replay.
+That's up to 16 picks on a normal week, fewer whenever a competition is
+between matchdays (see replay_pick.py's module docstring for why a quiet
+week never costs an LLM call).
+
+Adding a competition is a config.py change only (COMPETITIONS,
+LIVESOCCERTV_COMPETITION_IDS, FOOTBALL_DATA_CODES, BROADCASTERS, plus a
+label in pick_best_game.COMPETITION_LABELS) - nothing in this file
+hardcodes which competitions exist.
 
 Run manually with:  python -m src.main
 """
@@ -20,7 +26,7 @@ from . import config
 from .email_sender import send_email
 from .pick_best_game import COMPETITION_LABELS, ScoredMatch, score_matches
 from .replay_pick import ReplayPick, get_best_replays
-from .scrape_schedule import get_upcoming_matches
+from .scrape_schedule import Match, get_upcoming_matches
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -55,8 +61,15 @@ def _subject_line(scored: list[ScoredMatch]) -> str:
         label = COMPETITION_LABELS[top.match.competition]
         return f"This week's pick: {top.match.teams} ({label})"
     if scored:
-        return "This week's Champions League & Premier League games (unranked - standings unavailable)"
-    return "This week: no Champions League or Premier League games on Paramount+/Peacock"
+        return "This week's games (unranked - standings unavailable)"
+
+    labels = " / ".join(COMPETITION_LABELS[c] for c in config.COMPETITIONS)
+    broadcasters: list[str] = []
+    for c in config.COMPETITIONS:
+        b = config.BROADCASTERS[c]
+        if b not in broadcasters:
+            broadcasters.append(b)
+    return f"This week: no {labels} games found on {'/'.join(broadcasters)}"
 
 
 # ---------------------------------------------------------------------------
@@ -120,69 +133,53 @@ def _text_replay_section(
 
 def build_email_text(
     scored: list[ScoredMatch],
-    cl_replays: list[ReplayPick],
-    pl_replays: list[ReplayPick],
+    replays: dict[str, list[ReplayPick]],
 ) -> tuple[str, str]:
     """Returns (subject, plain_text_body)."""
     subject = _subject_line(scored)
 
     lines: list[str] = []
-    lines.extend(
-        _text_upcoming_section(
-            "Champions League - coming up",
-            "Paramount+",
-            _upcoming_picks(scored, "champions_league"),
-            config.LOOKAHEAD_DAYS,
-        )
-    )
-    lines.extend(
-        _text_upcoming_section(
-            "Premier League - coming up",
-            "Peacock",
-            _upcoming_picks(scored, "premier_league"),
-            config.LOOKAHEAD_DAYS,
-        )
-    )
-    lines.extend(
-        _text_replay_section(
-            "Champions League - best replay",
-            "Paramount+",
-            cl_replays,
-            config.LOOKBACK_DAYS,
-        )
-    )
-    lines.extend(
-        _text_replay_section(
-            "Premier League - best replay",
-            "Peacock",
-            pl_replays,
-            config.LOOKBACK_DAYS,
-        )
-    )
 
-    lines.append("ALL CHAMPIONS LEAGUE GAMES ON PARAMOUNT+")
-    lines.append("=" * 40)
-    cl_matches = [sm for sm in scored if sm.match.competition == "champions_league"]
-    if cl_matches:
-        for sm in cl_matches:
-            lines.append(_format_match_line(sm))
-    else:
-        lines.append("(none in the next %d days)" % config.LOOKAHEAD_DAYS)
-    lines.append("")
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        broadcaster = config.BROADCASTERS[comp]
+        lines.extend(
+            _text_upcoming_section(
+                f"{label} - coming up",
+                broadcaster,
+                _upcoming_picks(scored, comp),
+                config.LOOKAHEAD_DAYS,
+            )
+        )
 
-    lines.append("ALL PREMIER LEAGUE GAMES ON PEACOCK")
-    lines.append("=" * 40)
-    pl_matches = [sm for sm in scored if sm.match.competition == "premier_league"]
-    if pl_matches:
-        for sm in pl_matches:
-            lines.append(_format_match_line(sm))
-    else:
-        lines.append("(none in the next %d days)" % config.LOOKAHEAD_DAYS)
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        broadcaster = config.BROADCASTERS[comp]
+        lines.extend(
+            _text_replay_section(
+                f"{label} - best replay",
+                broadcaster,
+                replays.get(comp, []),
+                config.LOOKBACK_DAYS,
+            )
+        )
+
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        broadcaster = config.BROADCASTERS[comp]
+        lines.append(f"ALL {label.upper()} GAMES ON {broadcaster.upper()}")
+        lines.append("=" * 40)
+        comp_matches = [sm for sm in scored if sm.match.competition == comp]
+        if comp_matches:
+            for sm in comp_matches:
+                lines.append(_format_match_line(sm))
+        else:
+            lines.append("(none in the next %d days)" % config.LOOKAHEAD_DAYS)
+        lines.append("")
 
     unranked = [sm for sm in scored if sm.score is None]
     ranked = [sm for sm in scored if sm.score is not None]
     if unranked and ranked:
-        lines.append("")
         lines.append(
             "(Some games above aren't ranked because standings for one or "
             "both teams weren't available yet.)"
@@ -219,6 +216,7 @@ _SECONDARY_LABEL_STYLE = (
     "color:#828282; margin:0 0 8px 0;"
 )
 _MATCHUP_STYLE = "font-size:20px; font-weight:600; color:#1a1a1a; margin:0 0 8px 0;"
+_MATCHUP_NO_MARGIN_STYLE = "font-size:20px; font-weight:600; color:#1a1a1a; margin:0;"
 _META_STYLE = "font-size:16px; color:#555555; margin:0 0 10px 0;"
 _BLURB_STYLE = "font-size:16px; color:#333333; line-height:1.65; margin:0;"
 _LINK_STYLE = "font-size:15px; color:#2e7d32; text-decoration:none; font-weight:600;"
@@ -242,9 +240,6 @@ def _html_pick_card(label: str, sm: ScoredMatch, primary: bool) -> str:
         )
     parts.append("</div>")
     return "".join(parts)
-
-
-_MATCHUP_NO_MARGIN_STYLE = "font-size:20px; font-weight:600; color:#1a1a1a; margin:0;"
 
 
 def _html_replay_card(label: str, pick: ReplayPick, primary: bool) -> str:
@@ -326,48 +321,47 @@ def _html_all_games_list(title: str, matches: list[ScoredMatch], lookahead_days:
 
 def build_email_html(
     scored: list[ScoredMatch],
-    cl_replays: list[ReplayPick],
-    pl_replays: list[ReplayPick],
+    replays: dict[str, list[ReplayPick]],
 ) -> str:
-    cl_matches = [sm for sm in scored if sm.match.competition == "champions_league"]
-    pl_matches = [sm for sm in scored if sm.match.competition == "premier_league"]
     unranked = [sm for sm in scored if sm.score is None]
     ranked = [sm for sm in scored if sm.score is not None]
 
-    body = "".join(
-        [
+    sections: list[str] = []
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        broadcaster = config.BROADCASTERS[comp]
+        sections.append(
             _html_upcoming_section(
-                "Champions League - coming up",
-                "Paramount+",
-                _upcoming_picks(scored, "champions_league"),
+                f"{label} - coming up",
+                broadcaster,
+                _upcoming_picks(scored, comp),
                 config.LOOKAHEAD_DAYS,
-            ),
-            _html_upcoming_section(
-                "Premier League - coming up",
-                "Peacock",
-                _upcoming_picks(scored, "premier_league"),
-                config.LOOKAHEAD_DAYS,
-            ),
+            )
+        )
+
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        broadcaster = config.BROADCASTERS[comp]
+        sections.append(
             _html_replay_section(
-                "Champions League - best replay",
-                "Paramount+",
-                cl_replays,
+                f"{label} - best replay",
+                broadcaster,
+                replays.get(comp, []),
                 config.LOOKBACK_DAYS,
-            ),
-            _html_replay_section(
-                "Premier League - best replay",
-                "Peacock",
-                pl_replays,
-                config.LOOKBACK_DAYS,
-            ),
+            )
+        )
+
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        broadcaster = config.BROADCASTERS[comp]
+        comp_matches = [sm for sm in scored if sm.match.competition == comp]
+        sections.append(
             _html_all_games_list(
-                "All Champions League games on Paramount+", cl_matches, config.LOOKAHEAD_DAYS
-            ),
-            _html_all_games_list(
-                "All Premier League games on Peacock", pl_matches, config.LOOKAHEAD_DAYS
-            ),
-        ]
-    )
+                f"All {label} games on {broadcaster}", comp_matches, config.LOOKAHEAD_DAYS
+            )
+        )
+
+    body = "".join(sections)
 
     footer = ""
     if unranked and ranked:
@@ -386,7 +380,7 @@ def build_email_html(
 <body style="margin:0; padding:0; background-color:#eef1ee; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
 <div style="max-width:640px; margin:0 auto; padding:40px 28px 48px 28px; background-color:#ffffff;">
 <h1 style="font-size:28px; font-weight:700; color:#1a1a1a; margin:0 0 8px 0;">&#9917; Weekend Soccer Picks</h1>
-<p style="font-size:16px; color:#828282; margin:0 0 36px 0;">Champions League on Paramount+ &middot; Premier League on Peacock</p>
+<p style="font-size:16px; color:#828282; margin:0 0 36px 0;">Champions League &amp; Serie A on Paramount+ &middot; Premier League on Peacock &middot; Bundesliga on Fandango</p>
 {body}
 {footer}
 </div>
@@ -395,24 +389,25 @@ def build_email_html(
 
 
 def main() -> None:
-    logger.info("Fetching Champions League games on Paramount+...")
-    cl_matches = get_upcoming_matches("champions_league")
-    logger.info("Found %d Champions League game(s) on Paramount+.", len(cl_matches))
+    all_matches: list[Match] = []
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        broadcaster = config.BROADCASTERS[comp]
+        logger.info("Fetching %s games on %s...", label, broadcaster)
+        matches = get_upcoming_matches(comp)
+        logger.info("Found %d %s game(s) on %s.", len(matches), label, broadcaster)
+        all_matches.extend(matches)
 
-    logger.info("Fetching Premier League games on Peacock...")
-    pl_matches = get_upcoming_matches("premier_league")
-    logger.info("Found %d Premier League game(s) on Peacock.", len(pl_matches))
-
-    all_matches = cl_matches + pl_matches
     scored = score_matches(all_matches)
 
-    logger.info("Picking last week's best Champions League replays...")
-    cl_replays = get_best_replays("champions_league", n=2)
-    logger.info("Picking last week's best Premier League replays...")
-    pl_replays = get_best_replays("premier_league", n=2)
+    replays: dict[str, list[ReplayPick]] = {}
+    for comp in config.COMPETITIONS:
+        label = COMPETITION_LABELS[comp]
+        logger.info("Picking last week's best %s replays...", label)
+        replays[comp] = get_best_replays(comp, n=2)
 
-    subject, body_text = build_email_text(scored, cl_replays, pl_replays)
-    body_html = build_email_html(scored, cl_replays, pl_replays)
+    subject, body_text = build_email_text(scored, replays)
+    body_html = build_email_html(scored, replays)
     logger.info("Subject: %s", subject)
     print(body_text)
 

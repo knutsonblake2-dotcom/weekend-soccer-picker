@@ -42,23 +42,40 @@ ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
 # for the current fast-model ID.
 ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-haiku-4-5-20251001")
 
+# The competitions this project tracks, in the order they appear in the
+# email. Adding a competition here (plus the three dicts below) is the only
+# code change needed - everything downstream (scraping, standings,
+# scoring, replay picks, email building) is written generically against
+# this list rather than hardcoding "champions_league"/"premier_league".
+COMPETITIONS = ["champions_league", "premier_league", "serie_a", "bundesliga"]
+
 # Competition IDs used by livesoccertv.com (verified by inspecting the live
 # site in September 2026 - see README "If the scraper breaks" section if
 # these ever need updating).
 LIVESOCCERTV_COMPETITION_IDS = {
     "premier_league": "6",
     "champions_league": "50",
+    "serie_a": "39",
+    "bundesliga": "7",
 }
 
 # football-data.org competition codes (https://www.football-data.org/documentation/quickstart)
 FOOTBALL_DATA_CODES = {
     "premier_league": "PL",
     "champions_league": "CL",
+    "serie_a": "SA",
+    "bundesliga": "BL1",
 }
 
 BROADCASTERS = {
     "premier_league": "Peacock",
     "champions_league": "Paramount+",
+    "serie_a": "Paramount+",
+    # Only some Bundesliga games list "Fandango" in the channel list (others
+    # are Telemundo/Universo-only, or Peacock without a Fandango simulcast) -
+    # see the README caveat about this one being less of a "blanket rights"
+    # situation than the other three.
+    "bundesliga": "Fandango",
 }
 
 USER_AGENT = (

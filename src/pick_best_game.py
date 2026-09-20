@@ -19,6 +19,8 @@ from .scrape_schedule import Match
 COMPETITION_LABELS = {
     "premier_league": "Premier League",
     "champions_league": "Champions League",
+    "serie_a": "Serie A",
+    "bundesliga": "Bundesliga",
 }
 
 

@@ -1,24 +1,26 @@
 # Weekend Soccer Picker
 
 Every Sunday evening, this repo emails a **top pick and a secondary
-"also good" option** for each of four categories:
+"also good" option** for both upcoming games and last week's best
+replay, for each of four leagues:
 
-1. Best upcoming Champions League game on Paramount+ this week.
-2. Best upcoming Premier League game on Peacock this week.
-3. Best Champions League game to go back and watch as a replay from
-   last week.
-4. Best Premier League game to go back and watch as a replay from
-   last week.
+1. Champions League on Paramount+.
+2. Premier League on Peacock.
+3. Serie A on Paramount+.
+4. Bundesliga on Fandango.
 
-That's up to eight picks on a normal week - fewer whenever a category
+That's up to sixteen picks on a normal week - fewer whenever a category
 doesn't have a real second candidate (e.g. only one game airs, or a
-competition is between matchdays).
+league is between matchdays).
 
-It also lists every other Paramount+ Champions League / Peacock Premier
-League game coming up, for context. The email arrives as a nicely
-formatted HTML message (with a plain-text fallback for mail clients
-that want it). It runs for free on GitHub Actions - no server to
-maintain.
+It also lists every other game coming up in each league/broadcaster
+pairing, for context. The email arrives as a nicely formatted HTML
+message (with a plain-text fallback for mail clients that want it). It
+runs for free on GitHub Actions - no server to maintain.
+
+Adding another league later is just a `src/config.py` change (see the
+comment above `COMPETITIONS` there) - nothing else in the codebase
+hardcodes which leagues exist.
 
 ## How it decides the "best" game
 
@@ -47,11 +49,23 @@ after half-time, and how big an upset it was against the table. Either
 way, the email itself just names the matchups - no spoilers on the
 score.
 
-Replay picks are drawn from *all* finished Champions League / Premier
-League games in the last week, on the assumption that Paramount+
-carries every Champions League match and Peacock carries every Premier
-League match in the US (true as of when this was built - see "If the
-scraper breaks" below if that assumption ever stops holding).
+Replay picks are drawn from *all* finished games in the league's last
+week, on the assumption that the league's configured broadcaster
+carries every match in the US. That's true for Champions League/
+Paramount+, Premier League/Peacock, and Serie A/Paramount+ (all
+exclusive US deals as of when this was built).
+
+**Bundesliga is the one exception worth knowing about:** Fandango only
+carries *some* Bundesliga games (others are Telemundo/Universo-only, or
+Peacock without a Fandango simulcast) - it's not a blanket-rights deal
+like the other three. Upcoming-game picks are unaffected (the scraper
+checks each game's actual channel list before including it), but
+Bundesliga *replay* picks assume every finished game was on Fandango,
+which occasionally won't be true. If that turns out to matter in
+practice, the fix is either to drop `"bundesliga"` from
+`config.COMPETITIONS` (upcoming Bundesliga picks would disappear too)
+or to add a real broadcaster check to Bundesliga replay picks
+specifically - see "If the scraper breaks" below.
 
 **Cost control:** the Claude API call for replay picks is genuinely
 optional and skipped automatically whenever there's nothing worth
@@ -72,9 +86,8 @@ smarter replay picks, and to add them all as secrets on this repo.
 1. Go to <https://www.football-data.org/client/register> and register.
 2. Copy the API token they email/show you.
 
-The free tier covers the Premier League and Champions League standings
-this project needs, at 10 requests/minute - way more than we need for a
-once-a-week run.
+The free tier covers all four leagues' standings this project needs, at
+10 requests/minute - way more than we need for a once-a-week run.
 
 ### 2. Create a Gmail "app password"
 
@@ -98,8 +111,8 @@ address.
    once-a-week call to a small/cheap model costs a fraction of a cent,
    but it does need billing set up on the Anthropic Console.
 
-If you skip this, the two replay picks still work, just using the
-simpler stats-only formula instead of Claude's judgment.
+If you skip this, replay picks still work for all four leagues, just
+using the simpler stats-only formula instead of Claude's judgment.
 
 ### 4. Add repo secrets
 
@@ -112,7 +125,7 @@ New repository secret**. Add:
 | `GMAIL_ADDRESS` | your Gmail address |
 | `GMAIL_APP_PASSWORD` | the 16-character app password from step 2 |
 | `ANTHROPIC_API_KEY` | *(optional)* the key from step 3, for smarter replay picks |
-| `EMAIL_TO` | *(optional)* where to send the email, if different from `GMAIL_ADDRESS` |
+| `EMAIL_TO` | *(optional)* where to send the email, if different from `GMAIL_ADDRESS`. Can be a comma-separated list (e.g. `me@gmail.com,dad@gmail.com`) to send to more than one person. |
 
 ### 5. Make sure Actions are enabled
 
@@ -166,8 +179,9 @@ its page structure, the scraper in `src/scrape_schedule.py` may need
 updating. In particular:
 
 - `LIVESOCCERTV_COMPETITION_IDS` in `src/config.py` hardcodes the site's
-  internal numeric IDs for the Premier League (6) and Champions League
-  (50). These have been stable but aren't guaranteed to stay that way.
+  internal numeric IDs for each league (Premier League 6, Champions
+  League 50, Serie A 39, Bundesliga 7). These have been stable but
+  aren't guaranteed to stay that way.
 - The scraper looks for `<tr class="matchrow" data-cid="...">` rows with
   a `div.mchannels` broadcaster list and a `<span dv="...">` kickoff
   timestamp. If GitHub Actions runs start failing, check the Action's
@@ -176,21 +190,22 @@ updating. In particular:
 - Replay picks (last week's games) don't check the broadcaster at all -
   finished-match rows on livesoccertv.com collapse their channel list to
   a generic "Available on-demand" link, so instead the code assumes
-  every Champions League game is on Paramount+ and every Premier League
-  game is on Peacock (true in the US as of when this was built). If a
-  rights deal ever changes that, `src/replay_pick.py` would need a real
-  broadcaster check re-added.
+  every game in a league aired on that league's configured broadcaster
+  (see the Bundesliga/Fandango caveat above - that one's a real,
+  already-known exception rather than a hypothetical future one). If a
+  rights deal ever changes for one of the other three leagues too,
+  `src/replay_pick.py` would need a real broadcaster check added.
 
 ## Project layout
 
 ```
 src/
-  config.py          - environment variables and constants
-  scrape_schedule.py - finds upcoming/recent games on Paramount+ / Peacock
+  config.py          - environment variables, constants, and the list of tracked leagues
+  scrape_schedule.py - finds upcoming/recent games on each league's broadcaster
   standings.py        - fetches league tables + recent results from football-data.org
   team_aliases.py     - matches team names between data sources
   pick_best_game.py   - scores upcoming games and writes explanation blurbs
-  replay_pick.py       - picks the best game to rewatch from last week
+  replay_pick.py       - picks the best game(s) to rewatch from last week
   email_sender.py     - sends the email via Gmail SMTP
   main.py             - ties it all together
 .github/workflows/weekly-pick.yml - the schedule

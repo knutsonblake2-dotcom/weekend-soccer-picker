@@ -30,8 +30,10 @@ updating - see the README's "If the scraper breaks" section.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
+from functools import lru_cache
 from typing import List, Optional
 
 import requests
@@ -42,6 +44,25 @@ from . import config
 logger = logging.getLogger(__name__)
 
 BASE_URL = "https://www.livesoccertv.com/schedules/{date}/"
+
+# Every tracked competition (config.COMPETITIONS) independently asks for
+# the same day's schedule page - without caching, a 4-competition run was
+# making up to 4x as many requests as necessary and tripping
+# livesoccertv.com's rate limiting (HTTP 429 on nearly every fetch). This
+# throttle+cache pair fixes that: each date is fetched at most once per
+# run, and every actual request (including the first) is paced so a run
+# doesn't burst requests fast enough to get rate-limited in the first
+# place.
+_MIN_REQUEST_INTERVAL_SECONDS = 0.5
+_last_request_at = 0.0
+
+
+def _throttle() -> None:
+    global _last_request_at
+    elapsed = time.monotonic() - _last_request_at
+    if elapsed < _MIN_REQUEST_INTERVAL_SECONDS:
+        time.sleep(_MIN_REQUEST_INTERVAL_SECONDS - elapsed)
+    _last_request_at = time.monotonic()
 
 
 @dataclass
@@ -57,19 +78,36 @@ class Match:
         return self.kickoff_utc.astimezone(tz).strftime("%a %b %-d, %-I:%M %p %Z")
 
 
+@lru_cache(maxsize=None)
 def _fetch_html(day: date) -> str | None:
+    """Fetches (and, via lru_cache, remembers for the rest of this run) the
+    schedule page for `day`. Retries once after a longer pause if the
+    first attempt is rate-limited (429) - see the module-level comment
+    above for why that started happening once a fourth competition was
+    added.
+    """
     url = BASE_URL.format(date=day.isoformat())
-    try:
-        resp = requests.get(
-            url,
-            headers={"User-Agent": config.USER_AGENT},
-            timeout=20,
-        )
-        resp.raise_for_status()
-        return resp.text
-    except requests.RequestException as exc:
-        logger.warning("Failed to fetch %s: %s", url, exc)
-        return None
+    for attempt in range(2):
+        _throttle()
+        try:
+            resp = requests.get(
+                url,
+                headers={"User-Agent": config.USER_AGENT},
+                timeout=20,
+            )
+            if resp.status_code == 429 and attempt == 0:
+                logger.warning(
+                    "Rate limited (429) fetching %s - waiting and retrying once...",
+                    url,
+                )
+                time.sleep(5)
+                continue
+            resp.raise_for_status()
+            return resp.text
+        except requests.RequestException as exc:
+            logger.warning("Failed to fetch %s: %s", url, exc)
+            return None
+    return None
 
 
 def _parse_kickoff(row) -> datetime | None:

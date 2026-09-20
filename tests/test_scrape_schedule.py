@@ -10,7 +10,8 @@ Run with:  python -m tests.test_scrape_schedule
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from unittest.mock import Mock, patch
 
 from bs4 import BeautifulSoup
 
@@ -85,8 +86,58 @@ def test_finished_matches_score_extraction_and_ft_filter():
     print("test_finished_matches_score_extraction_and_ft_filter: OK")
 
 
+def test_fetch_html_is_cached_per_day_across_competitions():
+    # Every tracked competition asks _fetch_html for the same day - this
+    # verifies that only results in ONE actual HTTP request, not one per
+    # competition (this is what fixed the 429 rate-limiting once a fourth
+    # competition was added - see the comment above _fetch_html).
+    s._fetch_html.cache_clear()
+    fake_day = date(2099, 1, 1)  # a date nothing else in the suite touches
+    fake_response = Mock()
+    fake_response.status_code = 200
+    fake_response.text = "<html>fake schedule page</html>"
+    fake_response.raise_for_status = Mock()
+
+    with patch.object(s, "_throttle") as mock_throttle, patch(
+        "src.scrape_schedule.requests.get", return_value=fake_response
+    ) as mock_get:
+        first = s._fetch_html(fake_day)
+        second = s._fetch_html(fake_day)
+        third = s._fetch_html(fake_day)
+
+    assert first == second == third == "<html>fake schedule page</html>"
+    assert mock_get.call_count == 1, "expected exactly one HTTP request for a cached day"
+    assert mock_throttle.call_count == 1, "throttle should only run on the actual (uncached) fetch"
+    s._fetch_html.cache_clear()
+    print("test_fetch_html_is_cached_per_day_across_competitions: OK")
+
+
+def test_fetch_html_retries_once_on_429_then_succeeds():
+    s._fetch_html.cache_clear()
+    fake_day = date(2099, 1, 2)
+    rate_limited = Mock()
+    rate_limited.status_code = 429
+    ok_response = Mock()
+    ok_response.status_code = 200
+    ok_response.text = "<html>ok after retry</html>"
+    ok_response.raise_for_status = Mock()
+
+    with patch.object(s, "_throttle"), patch(
+        "src.scrape_schedule.requests.get", side_effect=[rate_limited, ok_response]
+    ) as mock_get, patch("src.scrape_schedule.time.sleep") as mock_sleep:
+        result = s._fetch_html(fake_day)
+
+    assert result == "<html>ok after retry</html>"
+    assert mock_get.call_count == 2, "expected a retry after the 429"
+    assert mock_sleep.called, "expected a backoff pause before retrying"
+    s._fetch_html.cache_clear()
+    print("test_fetch_html_retries_once_on_429_then_succeeds: OK")
+
+
 if __name__ == "__main__":
     test_real_premier_league_fixture()
     test_synthetic_champions_league_fixture()
     test_finished_matches_score_extraction_and_ft_filter()
+    test_fetch_html_is_cached_per_day_across_competitions()
+    test_fetch_html_retries_once_on_429_then_succeeds()
     print("All tests passed.")

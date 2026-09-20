@@ -411,7 +411,15 @@ def main() -> None:
     logger.info("Subject: %s", subject)
     print(body_text)
 
-    send_email(subject, body_text, body_html)
+    sent = send_email(subject, body_text, body_html)
+    if not sent:
+        # Make this loud: without this, a failed send (bad Gmail app
+        # password, Gmail rejecting the login, etc.) still exits 0, so the
+        # GitHub Actions run shows a green checkmark even though no email
+        # went out - exactly what happened when this was silent. Raising
+        # here turns that into a red X with the real error already printed
+        # above by email_sender.send_email()'s logger.error call.
+        raise SystemExit("Email failed to send - see the ERROR line above for why.")
 
 
 if __name__ == "__main__":

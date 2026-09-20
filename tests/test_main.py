@@ -6,6 +6,7 @@ Run with:  python -m tests.test_main
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from unittest.mock import patch
 
 from src import config, main
 from src.pick_best_game import ScoredMatch
@@ -138,6 +139,31 @@ def test_build_email_text_handles_totally_empty_week():
     print("test_build_email_text_handles_totally_empty_week: OK")
 
 
+def test_main_raises_when_email_fails_to_send():
+    # A failed send used to exit 0 silently (a GitHub Actions run would
+    # show green even though no email went out - exactly what happened
+    # with a bad Gmail app password). main() must now surface that as a
+    # failure so the run shows red instead.
+    with patch("src.main.get_upcoming_matches", return_value=[]), patch(
+        "src.main.get_best_replays", return_value=[]
+    ), patch("src.main.send_email", return_value=False):
+        try:
+            main.main()
+        except SystemExit:
+            pass
+        else:
+            raise AssertionError("main() should raise/exit when send_email fails")
+    print("test_main_raises_when_email_fails_to_send: OK")
+
+
+def test_main_does_not_raise_when_email_sends_successfully():
+    with patch("src.main.get_upcoming_matches", return_value=[]), patch(
+        "src.main.get_best_replays", return_value=[]
+    ), patch("src.main.send_email", return_value=True):
+        main.main()  # should complete without raising
+    print("test_main_does_not_raise_when_email_sends_successfully: OK")
+
+
 if __name__ == "__main__":
     test_all_four_competitions_are_configured()
     test_upcoming_picks_are_symmetric_top_two_per_competition()
@@ -145,4 +171,6 @@ if __name__ == "__main__":
     test_build_email_text_includes_secondary_picks_for_all_competitions()
     test_build_email_html_renders_all_picks_and_handles_empty_categories()
     test_build_email_text_handles_totally_empty_week()
+    test_main_raises_when_email_fails_to_send()
+    test_main_does_not_raise_when_email_sends_successfully()
     print("All tests passed.")

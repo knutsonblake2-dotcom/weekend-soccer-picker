@@ -406,6 +406,19 @@ def main() -> None:
         logger.info("Picking last week's best %s replays...", label)
         replays[comp] = get_best_replays(comp, n=2)
 
+    has_any_replays = any(replays.get(comp) for comp in config.COMPETITIONS)
+    if not all_matches and not has_any_replays:
+        # Nothing to report at all - no upcoming games on any tracked
+        # broadcaster, and no replay picks from last week either (e.g. a
+        # mid-season international break across every league at once).
+        # Sending an email that's just eight "nothing found" sections isn't
+        # useful, so skip it entirely rather than spamming an empty pick.
+        logger.info(
+            "No upcoming games and no replay picks found in any tracked "
+            "competition this week - skipping the email."
+        )
+        return
+
     subject, body_text = build_email_text(scored, replays)
     body_html = build_email_html(scored, replays)
     logger.info("Subject: %s", subject)

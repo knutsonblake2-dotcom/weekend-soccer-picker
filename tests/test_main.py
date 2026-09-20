@@ -143,8 +143,11 @@ def test_main_raises_when_email_fails_to_send():
     # A failed send used to exit 0 silently (a GitHub Actions run would
     # show green even though no email went out - exactly what happened
     # with a bad Gmail app password). main() must now surface that as a
-    # failure so the run shows red instead.
-    with patch("src.main.get_upcoming_matches", return_value=[]), patch(
+    # failure so the run shows red instead. There's at least one upcoming
+    # game here so main() actually reaches the send step (an all-empty
+    # week is skipped entirely - see test_main_skips_email_... below).
+    some_match = [_match("champions_league", "Some Game")]
+    with patch("src.main.get_upcoming_matches", return_value=some_match), patch(
         "src.main.get_best_replays", return_value=[]
     ), patch("src.main.send_email", return_value=False):
         try:
@@ -157,11 +160,26 @@ def test_main_raises_when_email_fails_to_send():
 
 
 def test_main_does_not_raise_when_email_sends_successfully():
-    with patch("src.main.get_upcoming_matches", return_value=[]), patch(
+    some_match = [_match("champions_league", "Some Game")]
+    with patch("src.main.get_upcoming_matches", return_value=some_match), patch(
         "src.main.get_best_replays", return_value=[]
     ), patch("src.main.send_email", return_value=True):
         main.main()  # should complete without raising
     print("test_main_does_not_raise_when_email_sends_successfully: OK")
+
+
+def test_main_skips_email_when_no_games_at_all():
+    # No upcoming games on any broadcaster AND no replay picks in any
+    # competition (e.g. every tracked league is between matchdays at the
+    # same time) - sending an email that's just eight empty sections isn't
+    # useful, so main() should skip send_email entirely rather than fail
+    # or send a blank pick.
+    with patch("src.main.get_upcoming_matches", return_value=[]), patch(
+        "src.main.get_best_replays", return_value=[]
+    ), patch("src.main.send_email") as mock_send:
+        main.main()
+        mock_send.assert_not_called()
+    print("test_main_skips_email_when_no_games_at_all: OK")
 
 
 if __name__ == "__main__":
@@ -173,4 +191,5 @@ if __name__ == "__main__":
     test_build_email_text_handles_totally_empty_week()
     test_main_raises_when_email_fails_to_send()
     test_main_does_not_raise_when_email_sends_successfully()
+    test_main_skips_email_when_no_games_at_all()
     print("All tests passed.")

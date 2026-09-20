@@ -115,17 +115,16 @@ def _text_replay_section(
         lines.append("")
         return lines
 
+    # No match_url here (unlike the upcoming-games section above) - that
+    # link leads to a page showing the final score, which defeats the
+    # point of a spoiler-free replay recommendation.
     top = picks[0]
     lines.append("Top pick: " + top.match.teams)
-    if top.match.match_url:
-        lines.append(top.match.match_url)
 
     if len(picks) > 1:
         second = picks[1]
         lines.append("")
         lines.append("Also good: " + second.match.teams)
-        if second.match.match_url:
-            lines.append(second.match.match_url)
 
     lines.append("")
     return lines
@@ -243,17 +242,15 @@ def _html_pick_card(label: str, sm: ScoredMatch, primary: bool) -> str:
 
 
 def _html_replay_card(label: str, pick: ReplayPick, primary: bool) -> str:
+    # No "Match details" link here (unlike _html_pick_card for upcoming
+    # games) - that page shows the final score, which spoils the point of
+    # a replay recommendation.
     m = pick.match
     card_style = _CARD_STYLE if primary else _SECONDARY_CARD_STYLE
     label_style = _LABEL_STYLE if primary else _SECONDARY_LABEL_STYLE
     parts = [f'<div style="{card_style}">']
     parts.append(f'<p style="{label_style}">{escape(label)}</p>')
     parts.append(f'<p style="{_MATCHUP_NO_MARGIN_STYLE}">{escape(m.teams)}</p>')
-    if m.match_url:
-        parts.append(
-            f'<p style="margin:12px 0 0 0;"><a href="{escape(m.match_url)}" '
-            f'style="{_LINK_STYLE}">Match details &rarr;</a></p>'
-        )
     parts.append("</div>")
     return "".join(parts)
 
